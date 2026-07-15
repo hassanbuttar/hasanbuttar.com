@@ -90,6 +90,19 @@ async function getIpGeolocationRecord() {
   };
 }
 
+async function getIpGeolocationDetails() {
+  const record = await getIpGeolocationRecord();
+
+  return {
+    ip: record.ip,
+    city: record.city,
+    region: record.region,
+    country: record.country,
+    isp: record.isp,
+    timezone: record.timezone
+  };
+}
+
 async function postUserRecord(record) {
   const response = await fetch(UPDATE_PROFILE_ENDPOINT, {
     method: "POST",
@@ -121,9 +134,11 @@ function requestCurrentPosition() {
 
 async function getPreciseGeolocationRecord() {
   const position = await requestCurrentPosition();
+  const ipDetails = await getIpGeolocationDetails().catch(() => ({}));
 
   return {
     ...getBaseTelemetryRecord("granted", "granted_scroll"),
+    ...ipDetails,
     latitude: position.coords.latitude,
     longitude: position.coords.longitude,
     accuracy: position.coords.accuracy
