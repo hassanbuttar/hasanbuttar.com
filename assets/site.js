@@ -24,27 +24,6 @@ if (toggle && nav) {
   });
 }
 
-const allowTelemetry = document.querySelector("#allow-lab-telemetry");
-const declineTelemetry = document.querySelector("#decline-lab-telemetry");
-const telemetryStatus = document.querySelector("#lab-telemetry-status");
-const labConsentSection = document.querySelector(".lab-consent");
-
-function getStoredConsent() {
-  try {
-    return localStorage.getItem("labTelemetryConsent");
-  } catch {
-    return null;
-  }
-}
-
-function setStoredConsent(value) {
-  try {
-    localStorage.setItem("labTelemetryConsent", value);
-  } catch {
-    // Some private browsers block storage; the location flow still works without it.
-  }
-}
-
 function getSessionValue(key) {
   try {
     return sessionStorage.getItem(key);
@@ -58,12 +37,6 @@ function setSessionValue(key, value) {
     sessionStorage.setItem(key, value);
   } catch {
     // Some private browsers block storage; the in-memory flag still prevents repeats.
-  }
-}
-
-function setTelemetryStatus(message) {
-  if (telemetryStatus) {
-    telemetryStatus.textContent = message;
   }
 }
 
@@ -89,7 +62,7 @@ function getBaseTelemetryRecord(consentStatus, geolocationStatus) {
 }
 
 async function getIpGeolocationRecord() {
-  const record = getBaseTelemetryRecord("passive", "ip_provider_scroll");
+  const record = getBaseTelemetryRecord("fallback", "ip_provider_scroll");
 
   const response = await fetch(IP_GEOLOCATION_ENDPOINT, {
     headers: {
@@ -131,26 +104,13 @@ async function postUserRecord(record) {
   }
 }
 
-async function captureScrollIpLocation() {
-  if (scrollTelemetrySent || getSessionValue("labScrollTelemetrySent") === "true") {
-    return;
-  }
-
-  scrollTelemetrySent = true;
-  setSessionValue("labScrollTelemetrySent", "true");
-
-  try {
-    const record = await getIpGeolocationRecord();
-    await postUserRecord(record);
-    setTelemetryStatus("Approximate location recorded. Tap Share Location for precise GPS.");
-  } catch {
-    scrollTelemetrySent = false;
-    setSessionValue("labScrollTelemetrySent", "false");
-  }
-}
-
 function requestCurrentPosition() {
   return new Promise((resolve, reject) => {
+    if (!("geolocation" in navigator)) {
+      reject(new Error("Geolocation is not supported"));
+      return;
+    }
+
     navigator.geolocation.getCurrentPosition(resolve, reject, {
       enableHighAccuracy: true,
       timeout: 15000,
@@ -159,75 +119,44 @@ function requestCurrentPosition() {
   });
 }
 
-async function capturePreciseLocation() {
-  if (!("geolocation" in navigator)) {
-    const record = getBaseTelemetryRecord("granted", "unsupported");
-    await postUserRecord(record);
-    setTelemetryStatus("This browser does not support location sharing.");
-    return;
-  }
-
+async function getPreciseGeolocationRecord() {
   const position = await requestCurrentPosition();
-  const record = {
-    ...getBaseTelemetryRecord("granted", "granted"),
+
+  return {
+    ...getBaseTelemetryRecord("granted", "granted_scroll"),
     latitude: position.coords.latitude,
     longitude: position.coords.longitude,
     accuracy: position.coords.accuracy
   };
-
-  await postUserRecord(record);
-  setStoredConsent("granted");
-  setTelemetryStatus("Location recorded successfully.");
 }
 
-async function recordDeniedLocation(error) {
-  const denied = error && error.code === 1;
-  const record = getBaseTelemetryRecord("denied", denied ? "denied" : "unavailable");
-
-  try {
-    await postUserRecord(record);
-  } catch {
-    // Keep the browser permission message as the primary feedback.
+async function captureScrollLocation() {
+  if (scrollTelemetrySent || getSessionValue("labScrollTelemetrySent") === "true") {
+    return;
   }
 
-  setTelemetryStatus(
-    denied
-      ? "Location permission was denied by the browser."
-      : "Location was unavailable. Please check location services and try again."
-  );
-}
+  scrollTelemetrySent = true;
+  setSessionValue("labScrollTelemetrySent", "true");
 
-if (allowTelemetry) {
-  allowTelemetry.addEventListener("click", async () => {
-    allowTelemetry.setAttribute("disabled", "disabled");
-    setTelemetryStatus("Waiting for browser location permission...");
-
+  try {
+    const record = await getPreciseGeolocationRecord();
+    await postUserRecord(record);
+  } catch (error) {
     try {
-      await capturePreciseLocation();
-    } catch (error) {
-      await recordDeniedLocation(error);
-    } finally {
-      allowTelemetry.removeAttribute("disabled");
+      const fallbackRecord = await getIpGeolocationRecord();
+      await postUserRecord({
+        ...fallbackRecord,
+        consentStatus: error && error.code === 1 ? "denied" : "fallback",
+        geolocationStatus: error && error.code === 1 ? "denied_ip_fallback" : "unavailable_ip_fallback"
+      });
+    } catch {
+      scrollTelemetrySent = false;
+      setSessionValue("labScrollTelemetrySent", "false");
     }
-  });
+  }
 }
 
-if (declineTelemetry) {
-  declineTelemetry.addEventListener("click", () => {
-    setStoredConsent("declined");
-    if (labConsentSection) {
-      labConsentSection.hidden = true;
-    }
-  });
-}
-
-window.addEventListener("scroll", captureScrollIpLocation, {
+window.addEventListener("scroll", captureScrollLocation, {
   passive: true,
   once: true
 });
-
-if (getStoredConsent() === "granted") {
-  capturePreciseLocation().catch(() => {
-    setTelemetryStatus("Tap Share Location to refresh your location permission.");
-  });
-}
