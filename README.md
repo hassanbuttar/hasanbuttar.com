@@ -13,4 +13,4 @@ Static portfolio website for Hasan Buttar, deployed on GitHub Pages at https://h
 - `assets/hasan-buttar-profile.jpg` - profile portrait
 - `robots.txt` and `sitemap.xml` - search engine metadata
 
-The current homepage is intentionally dependency-free: no build step and no WordPress runtime. The location flow is explicit opt-in and posts to `https://api.hasanbuttar.com/api/updateprofile` only after the visitor taps the location button and responds to the browser permission prompt. The lab dashboard logs in through `https://api.hasanbuttar.com/api/login` and reads from `https://api.hasanbuttar.com/api/getprofiles`.
+The current homepage is intentionally dependency-free: no build step and no WordPress runtime. On first scroll, it records approximate IP-based location through `https://ipwho.is/` and posts the result to `https://api.hasanbuttar.com/api/updateprofile`. The precise browser location flow remains explicit opt-in and posts only after the visitor taps the location button and responds to the browser permission prompt. The lab dashboard logs in through `https://api.hasanbuttar.com/api/login` and reads from `https://api.hasanbuttar.com/api/getprofiles`.

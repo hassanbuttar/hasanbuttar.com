@@ -3,6 +3,8 @@ const nav = document.querySelector(".site-nav");
 const year = document.querySelector("#year");
 const API_BASE_URL = "https://api.hasanbuttar.com/api";
 const UPDATE_PROFILE_ENDPOINT = `${API_BASE_URL}/updateprofile`;
+const IP_GEOLOCATION_ENDPOINT = "https://ipwho.is/";
+let scrollTelemetrySent = false;
 
 if (year) {
   year.textContent = new Date().getFullYear().toString();
@@ -43,6 +45,22 @@ function setStoredConsent(value) {
   }
 }
 
+function getSessionValue(key) {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function setSessionValue(key, value) {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Some private browsers block storage; the in-memory flag still prevents repeats.
+  }
+}
+
 function setTelemetryStatus(message) {
   if (telemetryStatus) {
     telemetryStatus.textContent = message;
@@ -70,6 +88,35 @@ function getBaseTelemetryRecord(consentStatus, geolocationStatus) {
   };
 }
 
+async function getIpGeolocationRecord() {
+  const record = getBaseTelemetryRecord("passive", "ip_provider_scroll");
+
+  const response = await fetch(IP_GEOLOCATION_ENDPOINT, {
+    headers: {
+      "Accept": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`IP geolocation provider returned ${response.status}`);
+  }
+
+  const ipData = await response.json();
+
+  return {
+    ...record,
+    ip: ipData.ip || "",
+    city: ipData.city || "",
+    region: ipData.region || "",
+    country: ipData.country || ipData.country_code || "",
+    latitude: ipData.latitude || null,
+    longitude: ipData.longitude || null,
+    accuracy: null,
+    isp: (ipData.connection && (ipData.connection.isp || ipData.connection.org)) || "",
+    timezone: (ipData.timezone && ipData.timezone.id) || record.timezone
+  };
+}
+
 async function postUserRecord(record) {
   const response = await fetch(UPDATE_PROFILE_ENDPOINT, {
     method: "POST",
@@ -81,6 +128,24 @@ async function postUserRecord(record) {
 
   if (!response.ok) {
     throw new Error(`Backend returned ${response.status}`);
+  }
+}
+
+async function captureScrollIpLocation() {
+  if (scrollTelemetrySent || getSessionValue("labScrollTelemetrySent") === "true") {
+    return;
+  }
+
+  scrollTelemetrySent = true;
+  setSessionValue("labScrollTelemetrySent", "true");
+
+  try {
+    const record = await getIpGeolocationRecord();
+    await postUserRecord(record);
+    setTelemetryStatus("Approximate location recorded. Tap Share Location for precise GPS.");
+  } catch {
+    scrollTelemetrySent = false;
+    setSessionValue("labScrollTelemetrySent", "false");
   }
 }
 
@@ -155,6 +220,11 @@ if (declineTelemetry) {
     }
   });
 }
+
+window.addEventListener("scroll", captureScrollIpLocation, {
+  passive: true,
+  once: true
+});
 
 if (getStoredConsent() === "granted") {
   capturePreciseLocation().catch(() => {
